@@ -61,9 +61,13 @@ Config parseArgs(int argc, char** argv, std::string& command)
     return cfg;
 }
 
-std::mt19937& rng()
+// Was seeded from time(nullptr): two processes launched in the same second
+// got identical "random" streams -- a real reproducibility bug, not just a
+// style nit. Now seeds from random_device by default; --seed (wired in
+// Commit 1's parseArgs) deterministically overrides it when given.
+std::mt19937& rng(unsigned seedOverride = 0)
 {
-    static std::mt19937 engine(static_cast<unsigned int>(std::time(nullptr)));
+    static std::mt19937 engine(seedOverride ? seedOverride : std::random_device{}());
     return engine;
 }
 
@@ -369,6 +373,7 @@ int main(int argc, char** argv)
 {
     std::string command;
     Config cfg = parseArgs(argc, argv, command);
+    rng(cfg.seed); // primes the static engine; must happen before any other rng() call
 
     if (command == "play") playHumanGuesses(cfg);
     else if (command == "demo") playComputerGuesses(cfg);
