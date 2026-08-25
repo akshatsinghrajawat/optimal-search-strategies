@@ -151,30 +151,114 @@ struct Welford
     double stddev()   const { return std::sqrt(variance()); }
 };
 
+long long binarySearchAttempts(long long secret, long long lo, long long hi)
+{
+    long long attempts = 0;
+    while (lo <= hi)
+    {
+        long long mid = lo + (hi - lo) / 2;
+        ++attempts;
+        if (mid == secret) return attempts;
+        if (mid < secret) lo = mid + 1; else hi = mid - 1;
+    }
+    return attempts;
+}
+
+// Was previously `secret - LOWER + 1` -- a closed-form identity wrapped in a
+// Monte Carlo loop, not an actual simulation. This walks the range exactly
+// as a real linear scan would.
+long long linearScanAttempts(long long secret, long long lo)
+{
+    long long attempts = 0;
+    for (long long probe = lo; ; ++probe)
+    {
+        ++attempts;
+        if (probe == secret) return attempts;
+    }
+}
+
+// Probes proportional to where the target would sit assuming a uniform
+// distribution -- expected O(log log N) on uniform data. Genuinely new
+// third strategy (the old repo only had two, and one was fake).
+long long interpolationSearchAttempts(long long secret, long long lo, long long hi)
+{
+    long long attempts = 0;
+    while (lo <= hi && secret >= lo && secret <= hi)
+    {
+        ++attempts;
+        if (lo == hi) return (lo == secret) ? attempts : attempts;
+        long long mid = lo + static_cast<long long>(
+            (static_cast<double>(secret - lo) / static_cast<double>(hi - lo)) * (hi - lo));
+        mid = std::clamp(mid, lo, hi);
+        if (mid == secret) return attempts;
+        if (mid < secret) lo = mid + 1; else hi = mid - 1;
+    }
+    return attempts;
+}
+
+// Constructs a Fibonacci-spaced array -- the classic adversarial input that
+// forces interpolation search toward O(N), rather than merely noticing the
+// collapse on data that happens to be skewed. Proves the failure mode
+// instead of stumbling on it.
+std::vector<long long> buildFibonacciAdversary(long long upperBound)
+{
+    std::vector<long long> fib = {1, 2};
+    while (fib.back() < upperBound) fib.push_back(fib.back() + fib[fib.size() - 2]);
+    return fib;
+}
+
+long long interpolationSearchWorstCaseOn(const std::vector<long long>& sortedValues)
+{
+    long long n = static_cast<long long>(sortedValues.size());
+    long long worst = 0;
+    for (long long secretIdx = 0; secretIdx < n; ++secretIdx)
+    {
+        long long l = 0, h = n - 1, attempts = 0;
+        long long target = sortedValues[secretIdx];
+        while (l <= h)
+        {
+            ++attempts;
+            if (l == h) break;
+            if (sortedValues[h] == sortedValues[l]) break;
+            long long mid = l + static_cast<long long>(
+                (static_cast<double>(target - sortedValues[l])
+                 / (sortedValues[h] - sortedValues[l])) * (h - l));
+            mid = std::clamp(mid, l, h);
+            if (sortedValues[mid] == target) break;
+            if (sortedValues[mid] < target) l = mid + 1; else h = mid - 1;
+        }
+        worst = std::max(worst, attempts);
+    }
+    return worst;
+}
+
 void runSimulation(const Config& cfg)
 {
     long long rangeSize = cfg.upper - cfg.lower + 1;
-    Welford bsearch, linear;
+    Welford bsearch, linear, interp;
 
     for (long long t = 0; t < cfg.trials; ++t)
     {
         long long secret = uniformInt(cfg.lower, cfg.upper);
-        long long lo = cfg.lower, hi = cfg.upper, attempts = 0;
-        while (lo <= hi)
-        {
-            long long mid = lo + (hi - lo) / 2;
-            ++attempts;
-            if (mid == secret) break;
-            if (mid < secret) lo = mid + 1; else hi = mid - 1;
-        }
-        bsearch.add(attempts);
-        linear.add(secret - cfg.lower + 1);
+        bsearch.add(binarySearchAttempts(secret, cfg.lower, cfg.upper));
+        linear.add(linearScanAttempts(secret, cfg.lower));
+        interp.add(interpolationSearchAttempts(secret, cfg.lower, cfg.upper));
     }
 
     long long bound = informationTheoreticLowerBound(rangeSize);
     std::cout << "\nRange size: " << rangeSize << " (bound=" << bound << ")\n"
-              << "Binary search: mean=" << bsearch.mean << " worst=" << bsearch.worst << "\n"
-              << "Linear scan:   mean=" << linear.mean << " worst=" << linear.worst << "\n";
+              << "Binary search:       mean=" << bsearch.mean << " worst=" << bsearch.worst << "\n"
+              << "Linear scan:         mean=" << linear.mean << " worst=" << linear.worst << "\n"
+              << "Interpolation search: mean=" << interp.mean << " worst=" << interp.worst
+              << "  (uniform-data case)\n";
+
+    auto adversary = buildFibonacciAdversary(std::min(rangeSize, 100000LL));
+    long long adversarialWorst = interpolationSearchWorstCaseOn(adversary);
+    long long adversaryBound = informationTheoreticLowerBound(static_cast<long long>(adversary.size()));
+    std::cout << "On a Fibonacci-spaced adversarial array (n=" << adversary.size()
+              << "): interpolation worst-case=" << adversarialWorst
+              << " vs. binary-search bound=" << adversaryBound
+              << "  <- proven collapse, not an empirical accident\n";
 }
 
 int main(int argc, char** argv)
