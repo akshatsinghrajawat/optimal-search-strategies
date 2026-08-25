@@ -4,6 +4,7 @@
 #include <ctime>
 #include <iostream>
 #include <limits>
+#include <numeric>
 #include <random>
 #include <string>
 #include <vector>
@@ -232,6 +233,94 @@ long long interpolationSearchWorstCaseOn(const std::vector<long long>& sortedVal
     return worst;
 }
 
+// ---------------------------------------------------------------------------
+// Weighted distributions + entropy-optimal search. Binary search is only
+// optimal when candidates are equiprobable; under a skewed prior you must
+// split *probability mass* in half, not candidate count. This is the single
+// change that turns the project from "binary search is optimal" (trivially
+// true only under uniformity) into a real study of when it stops being true.
+// ---------------------------------------------------------------------------
+std::vector<double> zipfWeights(long long n, double alpha = 1.0)
+{
+    std::vector<double> w(n);
+    for (long long i = 0; i < n; ++i) w[i] = 1.0 / std::pow(static_cast<double>(i + 1), alpha);
+    double total = std::accumulate(w.begin(), w.end(), 0.0);
+    for (auto& x : w) x /= total;
+    return w;
+}
+
+double shannonEntropyBits(const std::vector<double>& p)
+{
+    double h = 0.0;
+    for (double x : p) if (x > 0) h -= x * std::log2(x);
+    return h;
+}
+
+// NOTE ON QUERY MODEL: the game's normal "guess a number" mode gets 3-way
+// feedback (higher/lower/exact match), which lets a solver occasionally win
+// early via a lucky exact hit -- that's not a plain yes/no channel, so its
+// query count isn't directly comparable to the binary Shannon entropy H(p).
+// To compare cleanly against H(p), both strategies below use strict yes/no
+// queries ("is secret <= mid?"), terminating only once exactly one candidate
+// remains. This was caught by testing: an earlier version of this function
+// used the 3-way model and produced a mean *below* H(p), which is
+// mathematically impossible for a valid yes/no decision procedure -- the
+// fix here isn't a style choice, it's what makes the comparison valid.
+
+// Splits by cumulative probability mass rather than candidate count -- the
+// entropy-optimal generalization of binary search's plain midpoint rule.
+// Clamped to [lo, hi-1] so every query is guaranteed to leave both the
+// "yes" and "no" branches non-empty.
+long long entropyOptimalYesNoAttempts(long long secretIdx, long long lo, long long hi,
+                                       const std::vector<double>& cumWeight)
+{
+    long long attempts = 0;
+    while (lo < hi)
+    {
+        double lowMass = (lo > 0) ? cumWeight[lo - 1] : 0.0;
+        double target = lowMass + (cumWeight[hi] - lowMass) / 2.0;
+        auto it = std::lower_bound(cumWeight.begin() + lo, cumWeight.begin() + hi + 1, target);
+        long long mid = std::clamp(static_cast<long long>(it - cumWeight.begin()), lo, hi - 1);
+        ++attempts;
+        if (secretIdx <= mid) hi = mid; else lo = mid + 1;
+    }
+    return attempts;
+}
+
+long long binaryYesNoAttempts(long long secretIdx, long long lo, long long hi)
+{
+    long long attempts = 0;
+    while (lo < hi)
+    {
+        long long mid = lo + (hi - lo) / 2;
+        ++attempts;
+        if (secretIdx <= mid) hi = mid; else lo = mid + 1;
+    }
+    return attempts;
+}
+
+void runWeightedComparison(long long n, double alpha, long long trials)
+{
+    auto weight = zipfWeights(n, alpha);
+    std::vector<double> cum(n);
+    std::partial_sum(weight.begin(), weight.end(), cum.begin());
+    double H = shannonEntropyBits(weight);
+
+    std::discrete_distribution<long long> secretDist(weight.begin(), weight.end());
+    Welford bsearch, entropyOpt;
+    for (long long t = 0; t < trials; ++t)
+    {
+        long long secretIdx = secretDist(rng());
+        bsearch.add(binaryYesNoAttempts(secretIdx, 0, n - 1));
+        entropyOpt.add(entropyOptimalYesNoAttempts(secretIdx, 0, n - 1, cum));
+    }
+
+    std::cout << "\nZipf(alpha=" << alpha << ", N=" << n << "), yes/no queries: H(p)=" << H << " bits\n"
+              << "  Binary search (assumes uniform): mean=" << bsearch.mean << "\n"
+              << "  Entropy-optimal:                 mean=" << entropyOpt.mean
+              << "  (theoretical band: [" << H << ", " << (H + 1) << "))\n";
+}
+
 void runSimulation(const Config& cfg)
 {
     long long rangeSize = cfg.upper - cfg.lower + 1;
@@ -259,6 +348,8 @@ void runSimulation(const Config& cfg)
               << "): interpolation worst-case=" << adversarialWorst
               << " vs. binary-search bound=" << adversaryBound
               << "  <- proven collapse, not an empirical accident\n";
+
+    runWeightedComparison(rangeSize, 1.0, cfg.trials);
 }
 
 int main(int argc, char** argv)
