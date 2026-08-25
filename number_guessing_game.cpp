@@ -341,6 +341,19 @@ void runSimulation(const Config& cfg)
               << "Interpolation search: mean=" << interp.mean << " worst=" << interp.worst
               << "  (uniform-data case)\n";
 
+    // The README claims binary search's worst case matches ceil(log2 N)
+    // exactly. Previously this was only ever printed side-by-side with the
+    // bound -- if the two ever disagreed, the program would still exit 0
+    // and print happily. Now it's an actual assertion with a real exit code.
+    if (bsearch.worst > bound)
+    {
+        std::cerr << "BOUND VIOLATION: binary search worst=" << bsearch.worst
+                   << " exceeds bound=" << bound << "\n";
+        std::exit(EXIT_FAILURE);
+    }
+    std::cout << "PASS: binary search worst case (" << bsearch.worst
+              << ") does not exceed ceil(log2 N) = " << bound << "\n";
+
     auto adversary = buildFibonacciAdversary(std::min(rangeSize, 100000LL));
     long long adversarialWorst = interpolationSearchWorstCaseOn(adversary);
     long long adversaryBound = informationTheoreticLowerBound(static_cast<long long>(adversary.size()));
