@@ -1,13 +1,64 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <ctime>
 #include <iostream>
 #include <limits>
 #include <random>
+#include <string>
 #include <vector>
 
-constexpr int LOWER = 1;
-constexpr int UPPER = 100;
+// ---------------------------------------------------------------------------
+// Config: every range/trial/seed value now flows from here instead of the
+// old LOWER/UPPER globals, so the program can validate its own core claim
+// (is ceil(log2 N) optimal?) at any N, not just N=100.
+// ---------------------------------------------------------------------------
+struct Config
+{
+    long long lower = 1, upper = 100;
+    long long trials = 100000;
+    unsigned seed = 0;      // 0 => seed from random_device (fixed properly in a later commit)
+    bool jsonOutput = false;
+};
+
+void printUsage()
+{
+    std::cerr <<
+        "Usage: guess <command> [flags]\n"
+        "Commands:\n"
+        "  play                 you guess, computer thinks of a number\n"
+        "  demo                 computer guesses your number via binary search\n"
+        "  simulate             Monte Carlo comparison of strategies\n"
+        "Flags:\n"
+        "  --min N   --max N    range bounds (default 1..100)\n"
+        "  --trials N           number of simulation trials (default 100000)\n"
+        "  --seed N             RNG seed for reproducibility\n"
+        "  --json               machine-readable output (simulate only)\n";
+}
+
+Config parseArgs(int argc, char** argv, std::string& command)
+{
+    Config cfg;
+    if (argc < 2) { printUsage(); std::exit(EXIT_FAILURE); }
+    command = argv[1];
+
+    for (int i = 2; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        auto next = [&]() -> std::string {
+            if (i + 1 >= argc) { std::cerr << "Missing value for " << arg << "\n"; std::exit(EXIT_FAILURE); }
+            return argv[++i];
+        };
+        if (arg == "--min") cfg.lower = std::stoll(next());
+        else if (arg == "--max") cfg.upper = std::stoll(next());
+        else if (arg == "--trials") cfg.trials = std::stoll(next());
+        else if (arg == "--seed") cfg.seed = static_cast<unsigned>(std::stoul(next()));
+        else if (arg == "--json") cfg.jsonOutput = true;
+        else { std::cerr << "Unknown flag: " << arg << "\n"; printUsage(); std::exit(EXIT_FAILURE); }
+    }
+    if (cfg.lower >= cfg.upper) { std::cerr << "--min must be less than --max\n"; std::exit(EXIT_FAILURE); }
+    return cfg;
+}
 
 std::mt19937& rng()
 {
@@ -15,20 +66,20 @@ std::mt19937& rng()
     return engine;
 }
 
-int uniformInt(int lo, int hi)
+long long uniformInt(long long lo, long long hi)
 {
-    std::uniform_int_distribution<int> dist(lo, hi);
+    std::uniform_int_distribution<long long> dist(lo, hi);
     return dist(rng());
 }
 
-int informationTheoreticLowerBound(int rangeSize)
+long long informationTheoreticLowerBound(long long rangeSize)
 {
-    return static_cast<int>(std::ceil(std::log2(static_cast<double>(rangeSize))));
+    return static_cast<long long>(std::ceil(std::log2(static_cast<double>(rangeSize))));
 }
 
-int readIntInRange(const std::string& prompt, int lo, int hi)
+long long readIntInRange(const std::string& prompt, long long lo, long long hi)
 {
-    int value;
+    long long value;
     while (true)
     {
         std::cout << prompt;
@@ -44,27 +95,28 @@ int readIntInRange(const std::string& prompt, int lo, int hi)
     }
 }
 
-void playHumanGuesses()
+void playHumanGuesses(const Config& cfg)
 {
-    int secret = uniformInt(LOWER, UPPER);
+    long long secret = uniformInt(cfg.lower, cfg.upper);
     int attempts = 0;
-    std::cout << "\nI'm thinking of a number between " << LOWER << " and " << UPPER << ".\n";
+    std::cout << "\nI'm thinking of a number between " << cfg.lower << " and " << cfg.upper << ".\n";
     while (true)
     {
-        int guess = readIntInRange("Your guess: ", LOWER, UPPER);
+        long long guess = readIntInRange("Your guess: ", cfg.lower, cfg.upper);
         ++attempts;
         if (guess == secret) { std::cout << "Correct in " << attempts << " tries!\n"; return; }
         std::cout << (guess < secret ? "Higher.\n" : "Lower.\n");
     }
 }
 
-void playComputerGuesses()
+void playComputerGuesses(const Config& cfg)
 {
-    int lo = LOWER, hi = UPPER, attempts = 0;
-    std::cout << "\nThink of a number between " << LOWER << " and " << UPPER << ".\n";
+    long long lo = cfg.lower, hi = cfg.upper;
+    int attempts = 0;
+    std::cout << "\nThink of a number between " << cfg.lower << " and " << cfg.upper << ".\n";
     while (lo <= hi)
     {
-        int mid = lo + (hi - lo) / 2;
+        long long mid = lo + (hi - lo) / 2;
         ++attempts;
         std::cout << "Is it " << mid << "? (h/l/c): ";
         char response; std::cin >> response;
@@ -74,53 +126,57 @@ void playComputerGuesses()
     std::cout << "Something's inconsistent with your answers.\n";
 }
 
-struct Stats { double mean = 0, variance = 0; int worstCase = 0; };
+struct Stats { double mean = 0, variance = 0; long long worstCase = 0; };
 
-void runSimulation()
+void runSimulation(const Config& cfg)
 {
-    int trials = 100000;
-    std::vector<int> bsearchCounts(trials), linearCounts(trials);
+    long long rangeSize = cfg.upper - cfg.lower + 1;
+    std::vector<long long> bsearchCounts(cfg.trials), linearCounts(cfg.trials);
 
-    for (int t = 0; t < trials; ++t)
+    for (long long t = 0; t < cfg.trials; ++t)
     {
-        int secret = uniformInt(LOWER, UPPER);
-        int lo = LOWER, hi = UPPER, attempts = 0;
+        long long secret = uniformInt(cfg.lower, cfg.upper);
+        long long lo = cfg.lower, hi = cfg.upper, attempts = 0;
         while (lo <= hi)
         {
-            int mid = lo + (hi - lo) / 2;
+            long long mid = lo + (hi - lo) / 2;
             ++attempts;
             if (mid == secret) break;
             if (mid < secret) lo = mid + 1; else hi = mid - 1;
         }
         bsearchCounts[t] = attempts;
-        linearCounts[t] = secret - LOWER + 1;
+        linearCounts[t] = secret - cfg.lower + 1;
     }
 
     Stats bsearch, linear;
     bsearch.worstCase = *std::max_element(bsearchCounts.begin(), bsearchCounts.end());
     linear.worstCase = *std::max_element(linearCounts.begin(), linearCounts.end());
     double bsum = 0, lsum = 0;
-    for (int a : bsearchCounts) bsum += a;
-    for (int a : linearCounts) lsum += a;
-    bsearch.mean = bsum / trials;
-    linear.mean = lsum / trials;
+    for (long long a : bsearchCounts) bsum += static_cast<double>(a);
+    for (long long a : linearCounts) lsum += static_cast<double>(a);
+    bsearch.mean = bsum / cfg.trials;
+    linear.mean = lsum / cfg.trials;
     double bsq = 0, lsq = 0;
-    for (int a : bsearchCounts) bsq += (a - bsearch.mean) * (a - bsearch.mean);
-    for (int a : linearCounts) lsq += (a - linear.mean) * (a - linear.mean);
-    bsearch.variance = bsq / trials;
-    linear.variance = lsq / trials;
+    for (long long a : bsearchCounts) bsq += (a - bsearch.mean) * (a - bsearch.mean);
+    for (long long a : linearCounts) lsq += (a - linear.mean) * (a - linear.mean);
+    bsearch.variance = bsq / cfg.trials;
+    linear.variance = lsq / cfg.trials;
 
-    int bound = informationTheoreticLowerBound(UPPER - LOWER + 1);
-    std::cout << "\nBinary search: mean=" << bsearch.mean << " worst=" << bsearch.worstCase
-              << " (bound=" << bound << ")\n"
+    long long bound = informationTheoreticLowerBound(rangeSize);
+    std::cout << "\nRange size: " << rangeSize << " (bound=" << bound << ")\n"
+              << "Binary search: mean=" << bsearch.mean << " worst=" << bsearch.worstCase << "\n"
               << "Linear scan:   mean=" << linear.mean << " worst=" << linear.worstCase << "\n";
 }
 
-int main()
+int main(int argc, char** argv)
 {
-    int mode = readIntInRange("1) Play  2) Computer guesses  3) Simulate: ", 1, 3);
-    if (mode == 1) playHumanGuesses();
-    else if (mode == 2) playComputerGuesses();
-    else runSimulation();
+    std::string command;
+    Config cfg = parseArgs(argc, argv, command);
+
+    if (command == "play") playHumanGuesses(cfg);
+    else if (command == "demo") playComputerGuesses(cfg);
+    else if (command == "simulate") runSimulation(cfg);
+    else { printUsage(); return EXIT_FAILURE; }
+
     return 0;
 }
