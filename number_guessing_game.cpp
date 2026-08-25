@@ -325,14 +325,59 @@ void runWeightedComparison(long long n, double alpha, long long trials)
               << "  (theoretical band: [" << H << ", " << (H + 1) << "))\n";
 }
 
+double confidenceHalfWidth95(double stddev, long long n)
+{
+    return 1.96 * stddev / std::sqrt(static_cast<double>(n));
+}
+
+// Bins the actual drawn secrets into equal-width buckets and returns the
+// chi-square statistic against a uniform null hypothesis. Dogfoods the
+// project's own point: if the RNG's uniformity is ever suspect, it would
+// silently corrupt every mean/variance this program reports -- so check it.
+double chiSquareUniformity(const std::vector<long long>& draws, long long lo, long long hi, int bins)
+{
+    std::vector<long long> counts(bins, 0);
+    double width = static_cast<double>(hi - lo + 1) / bins;
+    for (long long x : draws)
+    {
+        int b = std::clamp(static_cast<int>((x - lo) / width), 0, bins - 1);
+        ++counts[b];
+    }
+    double expected = static_cast<double>(draws.size()) / bins;
+    double chi2 = 0.0;
+    for (long long c : counts) chi2 += (c - expected) * (c - expected) / expected;
+    return chi2;
+}
+
+// Exact analytic mean for binary search under uniformity: for range size N,
+// level k (1-indexed) holds the count of candidates first distinguished on
+// the k-th query. Computed directly, independent of any simulation, so the
+// Monte Carlo mean has real ground truth to be checked against.
+double analyticBinarySearchMean(long long n)
+{
+    double sum = 0.0;
+    long long remaining = n, level = 1;
+    while (remaining > 0)
+    {
+        long long atThisLevel = std::min(remaining, 1LL << (level - 1));
+        sum += static_cast<double>(atThisLevel) * level;
+        remaining -= atThisLevel;
+        ++level;
+    }
+    return sum / n;
+}
+
 void runSimulation(const Config& cfg)
 {
     long long rangeSize = cfg.upper - cfg.lower + 1;
     Welford bsearch, linear, interp;
+    std::vector<long long> drawnSecrets;
+    drawnSecrets.reserve(cfg.trials);
 
     for (long long t = 0; t < cfg.trials; ++t)
     {
         long long secret = uniformInt(cfg.lower, cfg.upper);
+        drawnSecrets.push_back(secret);
         bsearch.add(binarySearchAttempts(secret, cfg.lower, cfg.upper));
         linear.add(linearScanAttempts(secret, cfg.lower));
         interp.add(interpolationSearchAttempts(secret, cfg.lower, cfg.upper));
@@ -357,6 +402,21 @@ void runSimulation(const Config& cfg)
     }
     std::cout << "PASS: binary search worst case (" << bsearch.worst
               << ") does not exceed ceil(log2 N) = " << bound << "\n";
+
+    double ci = confidenceHalfWidth95(bsearch.stddev(), cfg.trials);
+    double analyticMean = analyticBinarySearchMean(rangeSize);
+    std::cout << "95% CI on binary search mean: " << bsearch.mean << " +/- " << ci
+              << "  [" << (bsearch.mean - ci) << ", " << (bsearch.mean + ci) << "]\n"
+              << "Analytic ground truth mean (exact, no sampling): " << analyticMean
+              << (std::abs(analyticMean - bsearch.mean) <= ci ? "  (inside CI, as expected)"
+                                                                : "  (OUTSIDE CI -- investigate)")
+              << "\n";
+
+    int bins = static_cast<int>(std::min<long long>(20, rangeSize));
+    double chi2 = chiSquareUniformity(drawnSecrets, cfg.lower, cfg.upper, bins);
+    std::cout << "Chi-square uniformity check on drawn secrets: chi2=" << chi2
+              << " across " << bins << " bins (df=" << (bins - 1)
+              << ") -- compare against a chi-square table if RNG quality is in doubt\n";
 
     auto adversary = buildFibonacciAdversary(std::min(rangeSize, 100000LL));
     long long adversarialWorst = interpolationSearchWorstCaseOn(adversary);
