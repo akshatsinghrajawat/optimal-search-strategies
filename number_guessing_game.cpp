@@ -225,6 +225,10 @@ std::vector<long long> buildFibonacciAdversary(long long upperBound)
     return fib;
 }
 
+// Runs interpolation search's midpoint formula against every element of a
+// pre-built array (see buildFibonacciAdversary above) and returns the worst
+// step count seen -- the actual measurement behind the "proven collapse"
+// claim printed in runSimulation below.
 long long interpolationSearchWorstCaseOn(const std::vector<long long>& sortedValues)
 {
     long long n = static_cast<long long>(sortedValues.size());
@@ -418,6 +422,13 @@ void writeSvgBarChart(const std::string& path, const std::vector<std::pair<std::
     out << "</svg>\n";
 }
 
+// Orchestrates the whole `simulate` command: runs binary/linear/interpolation
+// search over `cfg.trials` random secrets, asserts the measured worst case
+// against the information-theoretic bound (Flaw #4), reports a 95% CI and a
+// chi-square RNG uniformity check (Flaw #7), demonstrates interpolation
+// search's adversarial collapse (Flaw #3), and runs the entropy-optimal vs.
+// binary-search comparison under a skewed prior (Flaw #2). Optionally emits
+// --json stats and/or a --svg chart (Flaw #8).
 void runSimulation(const Config& cfg)
 {
     long long rangeSize = cfg.upper - cfg.lower + 1;
