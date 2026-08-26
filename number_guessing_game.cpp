@@ -81,9 +81,18 @@ long long uniformInt(long long lo, long long hi)
     return dist(rng());
 }
 
+// Worst-case comparisons for THIS binary search implementation is the
+// smallest k such that 2^k >= rangeSize+1 (equivalently ceil(log2(N+1))).
+// NOT ceil(log2(N)) -- the two formulas only disagree at exact powers of
+// two, which is exactly why the bug this replaces went unnoticed: the
+// repo's hardcoded default N=100 isn't a power of two. Computed with
+// integer bit-shifting rather than floating log2 to avoid floating-point
+// edge cases entirely.
 long long informationTheoreticLowerBound(long long rangeSize)
 {
-    return static_cast<long long>(std::ceil(std::log2(static_cast<double>(rangeSize))));
+    long long k = 0, capacity = 1;
+    while (capacity < rangeSize + 1) { capacity <<= 1; ++k; }
+    return k;
 }
 
 long long readIntInRange(const std::string& prompt, long long lo, long long hi)
@@ -492,6 +501,10 @@ void runSimulation(const Config& cfg)
     }
 }
 
+// Guarded so tests.cpp can #include this file and reuse every function
+// above without linking a second main(). A proper header/impl split lands
+// in a later commit; this is the minimal version until then.
+#ifndef GUESS_NO_MAIN
 int main(int argc, char** argv)
 {
     std::string command;
@@ -505,3 +518,4 @@ int main(int argc, char** argv)
 
     return 0;
 }
+#endif // GUESS_NO_MAIN
