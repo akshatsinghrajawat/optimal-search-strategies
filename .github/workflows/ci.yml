@@ -1,0 +1,13 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with sanitizers
+        run: g++ -std=c++17 -Wall -Wextra -Wpedantic -fsanitize=address,undefined tests.cpp -o tests
+      - name: Run tests
+        run: ./tests
+      - name: Build main program
+        run: g++ -std=c++17 -Wall -Wextra -Wpedantic number_guessing_game.cpp -o guess

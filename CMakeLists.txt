@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(optimal_search_strategies CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_compile_options(-Wall -Wextra -Wpedantic)
+add_executable(guess number_guessing_game.cpp)
+add_executable(tests tests.cpp)

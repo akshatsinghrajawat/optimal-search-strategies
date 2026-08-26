@@ -1,0 +1,5 @@
+guess
+tests
+*.o
+*.svg
+build/
