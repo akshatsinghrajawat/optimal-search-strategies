@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -18,8 +19,9 @@ struct Config
 {
     long long lower = 1, upper = 100;
     long long trials = 100000;
-    unsigned seed = 0;      // 0 => seed from random_device (fixed properly in a later commit)
+    unsigned seed = 0;      // 0 => seed from random_device
     bool jsonOutput = false;
+    std::string svgPath;    // empty => no chart written
 };
 
 void printUsage()
@@ -34,7 +36,8 @@ void printUsage()
         "  --min N   --max N    range bounds (default 1..100)\n"
         "  --trials N           number of simulation trials (default 100000)\n"
         "  --seed N             RNG seed for reproducibility\n"
-        "  --json               machine-readable output (simulate only)\n";
+        "  --json               machine-readable stats output (simulate only)\n"
+        "  --svg PATH            write a bar-chart SVG comparing strategies (simulate only)\n";
 }
 
 Config parseArgs(int argc, char** argv, std::string& command)
@@ -55,6 +58,7 @@ Config parseArgs(int argc, char** argv, std::string& command)
         else if (arg == "--trials") cfg.trials = std::stoll(next());
         else if (arg == "--seed") cfg.seed = static_cast<unsigned>(std::stoul(next()));
         else if (arg == "--json") cfg.jsonOutput = true;
+        else if (arg == "--svg") cfg.svgPath = next();
         else { std::cerr << "Unknown flag: " << arg << "\n"; printUsage(); std::exit(EXIT_FAILURE); }
     }
     if (cfg.lower >= cfg.upper) { std::cerr << "--min must be less than --max\n"; std::exit(EXIT_FAILURE); }
@@ -367,6 +371,44 @@ double analyticBinarySearchMean(long long n)
     return sum / n;
 }
 
+// Pure C++ SVG bar chart -- no external library or language needed. SVG is
+// plain text/XML, so this is just formatted output, the same way the JSON
+// printer above is. Opens directly in any browser or image viewer.
+void writeSvgBarChart(const std::string& path, const std::vector<std::pair<std::string, double>>& bars)
+{
+    double maxVal = 0.0;
+    for (const auto& b : bars) maxVal = std::max(maxVal, b.second);
+
+    const int width = 480, height = 260, barWidth = 90, gap = 30, baseY = 210, maxBarHeight = 160;
+    std::ofstream out(path);
+    if (!out)
+    {
+        std::cerr << "Could not open " << path << " for writing\n";
+        return;
+    }
+
+    out << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << width << "\" height=\"" << height << "\">\n"
+        << "  <rect width=\"100%\" height=\"100%\" fill=\"white\"/>\n"
+        << "  <line x1=\"30\" y1=\"" << baseY << "\" x2=\"" << (width - 20) << "\" y2=\"" << baseY
+        << "\" stroke=\"black\"/>\n";
+
+    int x = 50;
+    for (const auto& [label, value] : bars)
+    {
+        int barHeight = (maxVal > 0.0) ? static_cast<int>((value / maxVal) * maxBarHeight) : 0;
+        out << "  <rect x=\"" << x << "\" y=\"" << (baseY - barHeight) << "\" width=\"" << barWidth
+            << "\" height=\"" << barHeight << "\" fill=\"#4472C4\"/>\n"
+            << "  <text x=\"" << (x + barWidth / 2) << "\" y=\"" << (baseY - barHeight - 6)
+            << "\" font-size=\"12\" text-anchor=\"middle\" font-family=\"sans-serif\">"
+            << value << "</text>\n"
+            << "  <text x=\"" << (x + barWidth / 2) << "\" y=\"" << (baseY + 18)
+            << "\" font-size=\"12\" text-anchor=\"middle\" font-family=\"sans-serif\">"
+            << label << "</text>\n";
+        x += barWidth + gap;
+    }
+    out << "</svg>\n";
+}
+
 void runSimulation(const Config& cfg)
 {
     long long rangeSize = cfg.upper - cfg.lower + 1;
@@ -427,6 +469,27 @@ void runSimulation(const Config& cfg)
               << "  <- proven collapse, not an empirical accident\n";
 
     runWeightedComparison(rangeSize, 1.0, cfg.trials);
+
+    if (cfg.jsonOutput)
+    {
+        auto printJson = [](const std::string& label, double mean, double stddev, long long worst) {
+            std::cout << "{\"strategy\":\"" << label << "\",\"mean\":" << mean
+                       << ",\"stddev\":" << stddev << ",\"worst\":" << worst << "}\n";
+        };
+        printJson("binary_search", bsearch.mean, bsearch.stddev(), bsearch.worst);
+        printJson("linear_scan", linear.mean, linear.stddev(), linear.worst);
+        printJson("interpolation_search", interp.mean, interp.stddev(), interp.worst);
+    }
+
+    if (!cfg.svgPath.empty())
+    {
+        writeSvgBarChart(cfg.svgPath, {
+            {"binary", bsearch.mean},
+            {"linear", linear.mean},
+            {"interp", interp.mean},
+        });
+        std::cout << "Wrote chart to " << cfg.svgPath << "\n";
+    }
 }
 
 int main(int argc, char** argv)
