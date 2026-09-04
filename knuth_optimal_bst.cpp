@@ -127,6 +127,7 @@ void printOptimalTree(const vector<vector<int>>& root, int i, int j,
     printOptimalTree(root, r, j, names, depth + 1);
 }
 
+#ifndef KNUTH_NO_MAIN
 int main() {
     cout << fixed << setprecision(4);
 
@@ -190,3 +191,4 @@ int main() {
 
     return 0;
 }
+#endif

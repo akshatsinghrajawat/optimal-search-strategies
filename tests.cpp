@@ -1,5 +1,7 @@
 #define GUESS_NO_MAIN
 #include "number_guessing_game.cpp"
+#define KNUTH_NO_MAIN
+#include "knuth_optimal_bst.cpp"
 
 #include <cassert>
 #include <iostream>
@@ -91,6 +93,30 @@ void test_entropy_optimal_never_beats_shannon_bound()
     assert(exact >= H - 1e-9); // Shannon's lower bound, with float slack
 }
 
+void test_knuth_optimal_bst_uniform_matches_naive()
+{
+    // Under uniform priors there is no frequency skew to exploit, so the
+    // optimal tree should collapse to the same cost as the naive
+    // midpoint-split tree binary search implicitly builds.
+    int n = 5;
+    std::vector<double> p(n, 1.0 / (2 * n + 1));
+    std::vector<double> q(n + 1, 1.0 / (2 * n + 1));
+    auto result = knuthOptimalBST(p, q);
+    double naive = naiveMidpointBSTCost(p, q, 0, n, 1, nullptr);
+    assert(result.expectedCost - naive < 1e-9 && naive - result.expectedCost < 1e-9);
+}
+
+void test_knuth_optimal_bst_beats_naive_on_skewed_frequencies()
+{
+    // With a hot key away from the sorted midpoint, the optimal BST must
+    // strictly beat the frequency-blind midpoint-split tree.
+    std::vector<double> p = {0.60, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02};
+    std::vector<double> q = {0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.00};
+    int n = (int)p.size();
+    auto result = knuthOptimalBST(p, q);
+    double naive = naiveMidpointBSTCost(p, q, 0, n, 1, nullptr);
+    assert(result.expectedCost < naive - 1e-9);
+}
 int main()
 {
     test_information_theoretic_bound_edge_cases();
@@ -98,6 +124,8 @@ int main()
     test_binary_search_property_random();
     test_interpolation_search_correct_on_uniform_samples();
     test_entropy_optimal_never_beats_shannon_bound();
+    test_knuth_optimal_bst_uniform_matches_naive();
+    test_knuth_optimal_bst_beats_naive_on_skewed_frequencies();
     std::cout << "All tests passed.\n";
     return 0;
 }
