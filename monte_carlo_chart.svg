@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="260">
+  <rect width="100%" height="100%" fill="white"/>
+  <line x1="30" y1="210" x2="460" y2="210" stroke="black"/>
+  <rect x="50" y="169" width="90" height="41" fill="#4472C4"/>
+  <text x="95" y="163" font-size="12" text-anchor="middle" font-family="sans-serif">15.6874</text>
+  <text x="95" y="228" font-size="12" text-anchor="middle" font-family="sans-serif">binary</text>
+  <rect x="170" y="50" width="90" height="160" fill="#4472C4"/>
+  <text x="215" y="44" font-size="12" text-anchor="middle" font-family="sans-serif">50128.2</text>
+  <text x="215" y="228" font-size="12" text-anchor="middle" font-family="sans-serif">linear</text>
+  <rect x="290" y="187" width="90" height="23" fill="#4472C4"/>
+  <text x="335" y="181" font-size="12" text-anchor="middle" font-family="sans-serif">3.75747</text>
+  <text x="335" y="228" font-size="12" text-anchor="middle" font-family="sans-serif">interp</text>
+</svg>

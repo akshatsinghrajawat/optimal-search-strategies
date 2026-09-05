@@ -7,6 +7,7 @@ knuth_bst
 *.o
 *.exe
 *.svg
+!monte_carlo_chart.svg
 build/
 
 # Editor / IDE settings

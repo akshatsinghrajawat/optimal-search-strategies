@@ -498,10 +498,19 @@ double analyticBinarySearchMean(long long n)
 // Pure C++ SVG bar chart -- no external library or language needed. SVG is
 // plain text/XML, so this is just formatted output, the same way the JSON
 // printer above is. Opens directly in any browser or image viewer.
-void writeSvgBarChart(const std::string& path, const std::vector<std::pair<std::string, double>>& bars)
+//
+// logScale controls bar HEIGHT only -- the printed number above each bar is
+// always the real value. Needed because linear scan's mean is routinely
+// 10,000x binary/interpolation search's: on a linear axis the other two
+// bars round to 0px and effectively vanish. Log scale keeps every bar
+// visible without lying about the underlying numbers.
+void writeSvgBarChart(const std::string& path, const std::vector<std::pair<std::string, double>>& bars,
+                      bool logScale = false)
 {
+    auto scaled = [logScale](double v) { return logScale ? std::log10(v + 1.0) : v; };
+
     double maxVal = 0.0;
-    for (const auto& b : bars) maxVal = std::max(maxVal, b.second);
+    for (const auto& b : bars) maxVal = std::max(maxVal, scaled(b.second));
 
     const int width = 480, height = 260, barWidth = 90, gap = 30, baseY = 210, maxBarHeight = 160;
     std::ofstream out(path);
@@ -519,7 +528,7 @@ void writeSvgBarChart(const std::string& path, const std::vector<std::pair<std::
     int x = 50;
     for (const auto& [label, value] : bars)
     {
-        int barHeight = (maxVal > 0.0) ? static_cast<int>((value / maxVal) * maxBarHeight) : 0;
+        int barHeight = (maxVal > 0.0) ? static_cast<int>((scaled(value) / maxVal) * maxBarHeight) : 0;
         out << "  <rect x=\"" << x << "\" y=\"" << (baseY - barHeight) << "\" width=\"" << barWidth
             << "\" height=\"" << barHeight << "\" fill=\"#4472C4\"/>\n"
             << "  <text x=\"" << (x + barWidth / 2) << "\" y=\"" << (baseY - barHeight - 6)
@@ -627,12 +636,14 @@ void runSimulation(const Config& cfg)
 
     if (!cfg.svgPath.empty())
     {
+        // Log-scaled: linear scan's mean is ~10,000x binary/interpolation's,
+        // which renders the other two bars at 0px on a linear axis.
         writeSvgBarChart(cfg.svgPath, {
             {"binary", bsearch.mean},
             {"linear", linear.mean},
             {"interp", interp.mean},
-        });
-        std::cout << "Wrote chart to " << cfg.svgPath << "\n";
+        }, /*logScale=*/true);
+        std::cout << "Wrote chart to " << cfg.svgPath << " (log-scaled bars; labels show real means)\n";
     }
 }
 
