@@ -69,10 +69,19 @@ Config parseArgs(int argc, char** argv, std::string& command)
 // got identical "random" streams -- a real reproducibility bug, not just a
 // style nit. Now seeds from random_device by default; --seed (wired in
 // Commit 1's parseArgs) deterministically overrides it when given.
-std::mt19937& rng(unsigned seedOverride = 0)
+std::mt19937& rng()
 {
-    static std::mt19937 engine(seedOverride ? seedOverride : std::random_device{}());
+    static std::mt19937 engine(std::random_device{}());
     return engine;
+}
+
+// Separated from rng() itself: static locals init on first call only, so
+// folding the seed into rng()'s default argument meant *whichever* call
+// site ran first silently won -- if anything else called rng() before
+// main() seeded it, --seed would be ignored with no warning.
+void seedRng(unsigned seed)
+{
+    if (seed != 0) rng().seed(seed);
 }
 
 long long uniformInt(long long lo, long long hi)
@@ -90,8 +99,13 @@ long long uniformInt(long long lo, long long hi)
 // edge cases entirely.
 long long informationTheoreticLowerBound(long long rangeSize)
 {
-    long long k = 0, capacity = 1;
-    while (capacity < rangeSize + 1) { capacity <<= 1; ++k; }
+    // capacity/target are unsigned so an extreme --max (e.g. LLONG_MAX)
+    // can't trigger signed overflow on `rangeSize + 1` or shift a 1 into
+    // the sign bit via capacity <<= 1 -- both UB in the old signed version.
+    unsigned long long capacity = 1;
+    unsigned long long target = static_cast<unsigned long long>(rangeSize) + 1;
+    long long k = 0;
+    while (capacity < target) { capacity <<= 1; ++k; }
     return k;
 }
 
@@ -198,18 +212,27 @@ long long linearScanAttempts(long long secret, long long lo)
 // Probes proportional to where the target would sit assuming a uniform
 // distribution -- expected O(log log N) on uniform data. Genuinely new
 // third strategy (the old repo only had two, and one was fake).
-long long interpolationSearchAttempts(long long secret, long long lo, long long hi)
+// FIXED (was interpolationSearchAttempts(secret, lo, hi)): running
+// interpolation search directly on scalar [lo, hi] bounds makes
+// mid = lo + ((secret-lo)/(hi-lo))*(hi-lo) algebraically collapse to
+// mid = secret, so it "found" the target on query 1 almost every time --
+// that's not interpolation search on uniform data, it's testing on a
+// perfectly dense arithmetic progression. This version searches an actual
+// sampled array, same approach as interpolationSearchWorstCaseOn below.
+long long interpolationSearchAttemptsOnArray(long long target, const std::vector<long long>& sortedValues)
 {
-    long long attempts = 0;
-    while (lo <= hi && secret >= lo && secret <= hi)
+    long long l = 0, h = static_cast<long long>(sortedValues.size()) - 1, attempts = 0;
+    while (l <= h)
     {
         ++attempts;
-        if (lo == hi) return (lo == secret) ? attempts : attempts;
-        long long mid = lo + static_cast<long long>(
-            (static_cast<double>(secret - lo) / static_cast<double>(hi - lo)) * (hi - lo));
-        mid = std::clamp(mid, lo, hi);
-        if (mid == secret) return attempts;
-        if (mid < secret) lo = mid + 1; else hi = mid - 1;
+        if (l == h) break;
+        if (sortedValues[h] == sortedValues[l]) break;
+        long long mid = l + static_cast<long long>(
+            (static_cast<double>(target - sortedValues[l])
+             / (sortedValues[h] - sortedValues[l])) * (h - l));
+        mid = std::clamp(mid, l, h);
+        if (sortedValues[mid] == target) break;
+        if (sortedValues[mid] < target) l = mid + 1; else h = mid - 1;
     }
     return attempts;
 }
@@ -436,13 +459,26 @@ void runSimulation(const Config& cfg)
     std::vector<long long> drawnSecrets;
     drawnSecrets.reserve(cfg.trials);
 
+    // Uniform-data sample for interpolation search: N draws from
+    // [lower, upper], sorted into an actual array, so the search below is
+    // querying an array (see interpolationSearchAttemptsOnArray) instead
+    // of degenerating to mid = secret.
+    long long interpSampleSize = std::min(rangeSize, cfg.trials);
+    std::vector<long long> interpSample;
+    interpSample.reserve(interpSampleSize);
+    for (long long i = 0; i < interpSampleSize; ++i)
+        interpSample.push_back(uniformInt(cfg.lower, cfg.upper));
+    std::sort(interpSample.begin(), interpSample.end());
+
     for (long long t = 0; t < cfg.trials; ++t)
     {
         long long secret = uniformInt(cfg.lower, cfg.upper);
         drawnSecrets.push_back(secret);
         bsearch.add(binarySearchAttempts(secret, cfg.lower, cfg.upper));
         linear.add(linearScanAttempts(secret, cfg.lower));
-        interp.add(interpolationSearchAttempts(secret, cfg.lower, cfg.upper));
+
+        long long interpTarget = interpSample[uniformInt(0, static_cast<long long>(interpSample.size()) - 1)];
+        interp.add(interpolationSearchAttemptsOnArray(interpTarget, interpSample));
     }
 
     long long bound = informationTheoreticLowerBound(rangeSize);
@@ -520,7 +556,7 @@ int main(int argc, char** argv)
 {
     std::string command;
     Config cfg = parseArgs(argc, argv, command);
-    rng(cfg.seed); // primes the static engine; must happen before any other rng() call
+    seedRng(cfg.seed); // must happen before any other rng() call
 
     if (command == "play") playHumanGuesses(cfg);
     else if (command == "demo") playComputerGuesses(cfg);

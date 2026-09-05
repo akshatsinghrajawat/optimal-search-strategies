@@ -1,5 +1,18 @@
+# Custom executables
 guess
 tests
+knuth_bst
+
+# Build artifacts and generated files
 *.o
+*.exe
 *.svg
 build/
+
+# Editor / IDE settings
+.vscode/
+.idea/
+*.swp
+
+# OS generated files
+.DS_Store

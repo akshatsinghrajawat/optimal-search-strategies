@@ -64,13 +64,24 @@ void test_binary_search_property_random(int iterations = 20000)
 
 void test_interpolation_search_correct_on_uniform_samples()
 {
+    // Was calling interpolationSearchAttempts(secret, lo, hi) directly on
+    // scalar bounds, which always returns 1 (see the fix in
+    // number_guessing_game.cpp) -- and this test's old assertion
+    // (attempts > 0) was too weak to ever catch that. Now runs the
+    // array-based search and asserts it stays well under a linear scan,
+    // which the degenerate version would still pass but a broken
+    // O(N)-collapse would not.
     std::mt19937 gen(7);
     std::uniform_int_distribution<long long> d(1, 1000000);
-    for (int i = 0; i < 5000; ++i)
+    std::vector<long long> sample(5000);
+    for (auto& v : sample) v = d(gen);
+    std::sort(sample.begin(), sample.end());
+
+    for (long long target : sample)
     {
-        long long secret = d(gen);
-        long long attempts = interpolationSearchAttempts(secret, 1, 1000000);
-        assert(attempts > 0); // sanity: always terminates and reports a positive count
+        long long attempts = interpolationSearchAttemptsOnArray(target, sample);
+        assert(attempts > 0);
+        assert(attempts < static_cast<long long>(sample.size()));
     }
 }
 
