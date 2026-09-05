@@ -17,6 +17,9 @@
 //   g++ -O2 -std=c++17 -Wall -Wextra knuth_optimal_bst.cpp -o knuth_bst
 //   ./knuth_bst
 
+#ifndef OPTIMAL_SEARCH_STRATEGIES_KNUTH_OPTIMAL_BST_CPP
+#define OPTIMAL_SEARCH_STRATEGIES_KNUTH_OPTIMAL_BST_CPP
+
 #include <iostream>
 #include <vector>
 #include <iomanip>
@@ -99,6 +102,23 @@ KnuthBSTResult knuthOptimalBST(const vector<double>& p, const vector<double>& q)
     }
 
     return { e[0][n], root };
+}
+
+// Walks the root table Knuth's DP built to find how many comparisons it
+// takes to locate targetKey (1-indexed, 1..n) in the optimal tree -- this
+// is the actual traversal a search would perform, not just the aggregate
+// expectedCost number above. Lets number_guessing_game.cpp's Monte Carlo
+// loop measure Knuth's optimal BST empirically, the same way it already
+// measures binary search and the entropy-optimal heuristic.
+long long knuthBstSearchAttempts(int targetKey, const std::vector<std::vector<int>>& root, int n) {
+    int i = 0, j = n;
+    long long attempts = 0;
+    while (true) {
+        int r = root[i][j];
+        ++attempts;
+        if (targetKey == r) return attempts;
+        if (targetKey < r) j = r - 1; else i = r;
+    }
 }
 
 // Cost of a plain sorted-order (unweighted) binary search tree, i.e. what
@@ -192,3 +212,5 @@ int main() {
     return 0;
 }
 #endif
+
+#endif // OPTIMAL_SEARCH_STRATEGIES_KNUTH_OPTIMAL_BST_CPP

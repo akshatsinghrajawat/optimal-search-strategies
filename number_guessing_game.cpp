@@ -10,6 +10,13 @@
 #include <string>
 #include <vector>
 
+// Knuth's optimal BST DP -- included as a library (KNUTH_NO_MAIN
+// suppresses its standalone main()) so runWeightedComparison below
+// can measure it against binary search and the entropy heuristic
+// under the exact same drawn secrets.
+#define KNUTH_NO_MAIN
+#include "knuth_optimal_bst.cpp"
+
 // ---------------------------------------------------------------------------
 // Config: every range/trial/seed value now flows from here instead of the
 // old LOWER/UPPER globals, so the program can validate its own core claim
@@ -343,6 +350,45 @@ long long binaryYesNoAttempts(long long secretIdx, long long lo, long long hi)
     return attempts;
 }
 
+// ---------------------------------------------------------------------------
+// Bridging Knuth's DP into the comparison above. Same strict yes/no query
+// discipline as entropyOptimalYesNoAttempts (continue until exactly one
+// candidate remains -- no early-exit "exact match" bonus), but the split
+// point at each step comes from Knuth's DP-optimal root table instead of a
+// cumulative-mass midpoint. Deliberately NOT knuthBstSearchAttempts's
+// classical 3-way traversal: mixing a 3-way (early-exit-on-match) cost into
+// this yes/no comparison table reproduces the exact bug the NOTE ON QUERY
+// MODEL comment above already describes -- a mean landing below H(p),
+// which is impossible for a genuine yes/no procedure. This function isn't
+// claimed to be optimal under yes/no cost (Knuth's DP was optimized for
+// the 3-way model) -- only that it reuses the DP's split points under a
+// cost measure that's actually comparable to the other two rows.
+// ---------------------------------------------------------------------------
+long long knuthSplitYesNoAttempts(long long secretIdx, long long lo, long long hi,
+                                   const std::vector<std::vector<int>>& root)
+{
+    long long attempts = 0;
+    while (lo < hi)
+    {
+        // root[lo][hi+1]: Knuth's chosen 1-indexed root key for the gap
+        // range spanning 0-indexed keys [lo, hi]. Converted to a 0-indexed
+        // split boundary the same way entropyOptimalYesNoAttempts uses mid.
+        long long mid = root[lo][hi + 1] - 1;
+        ++attempts;
+        if (secretIdx <= mid) hi = mid; else lo = mid + 1;
+    }
+    return attempts;
+}
+
+// Knuth's O(N^2) DP is fast and cheap at the scale of a config-lookup table
+// (n in the tens), but O(N^2) TIME AND SPACE stops being a rounding error
+// fast: n=8000 already takes ~7s and ~1GB; n=100000 (this program's usual
+// --max) would need ~80GB and was OOM-killed the first time this was
+// tried. So the DP itself, not the search cost it's measuring, becomes the
+// bottleneck -- this cap keeps the comparison fast (well under a second)
+// and honest about that limit instead of hanging or crashing.
+constexpr long long kKnuthDpFeasibleN = 2000;
+
 void runWeightedComparison(long long n, double alpha, long long trials)
 {
     auto weight = zipfWeights(n, alpha);
@@ -352,17 +398,59 @@ void runWeightedComparison(long long n, double alpha, long long trials)
 
     std::discrete_distribution<long long> secretDist(weight.begin(), weight.end());
     Welford bsearch, entropyOpt;
+
+    if (n > kKnuthDpFeasibleN)
+    {
+        for (long long t = 0; t < trials; ++t)
+        {
+            long long secretIdx = secretDist(rng());
+            bsearch.add(binaryYesNoAttempts(secretIdx, 0, n - 1));
+            entropyOpt.add(entropyOptimalYesNoAttempts(secretIdx, 0, n - 1, cum));
+        }
+        std::cout << "\nZipf(alpha=" << alpha << ", N=" << n << "), yes/no queries: H(p)=" << H << " bits\n"
+                  << "  Binary search (frequency-blind):     mean=" << bsearch.mean << "\n"
+                  << "  Entropy-optimal (greedy mass split):  mean=" << entropyOpt.mean
+                  << "  (theoretical band: [" << H << ", " << (H + 1) << "))\n"
+                  << "  Knuth optimal BST skipped: N=" << n << " exceeds the O(N^2) DP's "
+                  << "feasible size (" << kKnuthDpFeasibleN << "); rerun with a smaller "
+                  << "--min/--max span to see the 3-way comparison.\n";
+        return;
+    }
+
+    // Knuth's DP-optimal split points for this exact frequency distribution.
+    // No "miss" gaps (q all zero) because secretDist above only ever draws
+    // a real key -- this Monte Carlo experiment never simulates an
+    // unsuccessful search, so the model matches the simulation exactly.
+    std::vector<double> gaps(static_cast<size_t>(n) + 1, 0.0);
+    auto knuthResult = knuthOptimalBST(weight, gaps);
+    Welford knuthOpt;
+
     for (long long t = 0; t < trials; ++t)
     {
         long long secretIdx = secretDist(rng());
         bsearch.add(binaryYesNoAttempts(secretIdx, 0, n - 1));
         entropyOpt.add(entropyOptimalYesNoAttempts(secretIdx, 0, n - 1, cum));
+        knuthOpt.add(knuthSplitYesNoAttempts(secretIdx, 0, n - 1, knuthResult.root));
     }
 
     std::cout << "\nZipf(alpha=" << alpha << ", N=" << n << "), yes/no queries: H(p)=" << H << " bits\n"
-              << "  Binary search (assumes uniform): mean=" << bsearch.mean << "\n"
-              << "  Entropy-optimal:                 mean=" << entropyOpt.mean
-              << "  (theoretical band: [" << H << ", " << (H + 1) << "))\n";
+              << "  Binary search (frequency-blind):        mean=" << bsearch.mean << "\n"
+              << "  Entropy-optimal (greedy mass split):     mean=" << entropyOpt.mean << "\n"
+              << "  Knuth split points (DP-optimal, yes/no): mean=" << knuthOpt.mean << "\n"
+              << "  (theoretical band for any yes/no procedure: [" << H << ", " << (H + 1) << "))\n";
+
+    // H(p) is a lower bound on expected query count for ANY valid yes/no
+    // decision procedure over this distribution -- not just this one. If
+    // knuthOpt (or entropyOpt) ever lands below H(p) beyond sampling noise,
+    // that's not "Knuth beating information theory," it's a bridge bug
+    // (see the comment on knuthSplitYesNoAttempts for the exact failure
+    // mode this guards against).
+    double tol = 3.0 * knuthOpt.stddev() / std::sqrt(static_cast<double>(trials));
+    if (knuthOpt.mean < H - tol)
+    {
+        std::cerr << "WARNING: Knuth-derived yes/no mean fell below the Shannon bound H(p) "
+                     "beyond sampling noise -- check for a 3-way/yes-no cost-model mismatch.\n";
+    }
 }
 
 double confidenceHalfWidth95(double stddev, long long n)

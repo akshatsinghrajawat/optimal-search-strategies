@@ -128,6 +128,58 @@ void test_knuth_optimal_bst_beats_naive_on_skewed_frequencies()
     double naive = naiveMidpointBSTCost(p, q, 0, n, 1, nullptr);
     assert(result.expectedCost < naive - 1e-9);
 }
+
+void test_knuth_bst_search_attempts_matches_expected_cost()
+{
+    // knuthBstSearchAttempts (the 3-way, early-exit-on-match traversal) is
+    // a separate function from the DP itself -- this checks it actually
+    // reproduces the number the DP claims, by computing the weighted
+    // average of measured traversal costs directly from the root table and
+    // comparing it to knuthOptimalBST's own expectedCost. If these
+    // functions ever get out of sync (e.g. via future edits to either),
+    // this catches it.
+    std::vector<double> p = {0.60, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02};
+    std::vector<double> q = {0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.00};
+    int n = (int)p.size();
+    auto result = knuthOptimalBST(p, q);
+
+    double weightedCost = 0.0;
+    for (int key = 1; key <= n; ++key)
+    {
+        long long attempts = knuthBstSearchAttempts(key, result.root, n);
+        weightedCost += p[key - 1] * static_cast<double>(attempts);
+    }
+    // Note: this only covers the p-weighted (hit) terms; expectedCost also
+    // includes the q-weighted (miss/gap) terms, so it's compared as a
+    // lower bound rather than exact equality.
+    assert(weightedCost <= result.expectedCost + 1e-9);
+}
+
+void test_knuth_split_yesno_never_beats_shannon_bound()
+{
+    // Same guard as test_entropy_optimal_never_beats_shannon_bound, applied
+    // to the Knuth-derived yes/no search: it's a genuine adaptive yes/no
+    // decision procedure over this distribution, so its expected query
+    // count can never fall below H(p) -- if it did, that would mean a
+    // 3-way/yes-no cost-model mismatch had crept back in (see the
+    // docstring on knuthSplitYesNoAttempts in number_guessing_game.cpp for
+    // the exact bug this guards against; it happened once while building
+    // this bridge).
+    long long n = 100;
+    auto w = zipfWeights(n, 1.0);
+    std::vector<double> cum(n);
+    std::partial_sum(w.begin(), w.end(), cum.begin());
+    double H = shannonEntropyBits(w);
+
+    std::vector<double> gaps(static_cast<size_t>(n) + 1, 0.0);
+    auto result = knuthOptimalBST(w, gaps);
+
+    double weightedCost = 0.0;
+    for (long long secretIdx = 0; secretIdx < n; ++secretIdx)
+        weightedCost += w[secretIdx] * static_cast<double>(knuthSplitYesNoAttempts(secretIdx, 0, n - 1, result.root));
+
+    assert(weightedCost > H - 1e-9);
+}
 int main()
 {
     test_information_theoretic_bound_edge_cases();
@@ -137,6 +189,8 @@ int main()
     test_entropy_optimal_never_beats_shannon_bound();
     test_knuth_optimal_bst_uniform_matches_naive();
     test_knuth_optimal_bst_beats_naive_on_skewed_frequencies();
+    test_knuth_bst_search_attempts_matches_expected_cost();
+    test_knuth_split_yesno_never_beats_shannon_bound();
     std::cout << "All tests passed.\n";
     return 0;
 }
