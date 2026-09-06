@@ -58,7 +58,7 @@ BST against this exact bound under a Zipf-distributed prior.
 
 ## Bugs this project found
 
-Five real bugs surfaced while building and testing this, not while writing
+Six real bugs surfaced while building and testing this, not while writing
 the original code -- each caught by an assertion, a test, or a sanity check
 actually firing, not by inspection:
 
@@ -89,6 +89,15 @@ actually firing, not by inspection:
   the Shannon bound `H(p)` -- mathematically impossible for a real yes/no
   procedure. Fixed by deriving a yes/no-consistent traversal from Knuth's
   split points instead, with a test guarding against the regression.
+- **CMake's Release build was silently disabling every test.** Release mode
+  defines `NDEBUG`, which compiles out every `assert()` -- and `assert()`
+  is this suite's only test mechanism. `cmake -B build && cmake --build
+  build` (this README's own documented command) built a `tests` binary
+  that ran zero actual checks and unconditionally printed "All tests
+  passed." Caught by 8 "unused variable" compiler warnings on variables
+  that only exist to feed asserts, then confirmed by deliberately breaking
+  a real invariant and watching the Release build still report success.
+  Fixed by explicitly un-defining `NDEBUG` for the `tests` target only.
 
 ## What's actually verified, not just claimed
 
