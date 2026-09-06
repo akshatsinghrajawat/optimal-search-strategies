@@ -24,3 +24,12 @@ target_compile_options(guess PRIVATE $<$<CONFIG:Release>:-O3>)
 # scoped only to this target so `guess` doesn't get sanitizer overhead.
 target_compile_options(tests PRIVATE $<$<CONFIG:Debug>:-fsanitize=address,undefined -g>)
 target_link_options(tests PRIVATE $<$<CONFIG:Debug>:-fsanitize=address,undefined>)
+
+# Release mode defines NDEBUG, which silently compiles out every assert() --
+# and assert() is this suite's only test mechanism (no separate framework).
+# Without this, `cmake -B build && cmake --build build` (the README's own
+# documented command) would build a `tests` binary that runs zero actual
+# checks and unconditionally prints "All tests passed." -UNDEBUG placed
+# after Release's -DNDEBUG on the command line overrides it for this
+# target only; `guess` still gets NDEBUG's other Release behavior.
+target_compile_options(tests PRIVATE -UNDEBUG)
